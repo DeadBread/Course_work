@@ -2,6 +2,23 @@
 
 f = open("../output.txt")
 
+class Word:
+    def __init__(self, word_dict):
+        self.word_dict = word_dict
+        self.parsed_features = self.__parse_features__()
+
+    def __parse_features__(self):
+        features = self.word_dict['morph features'].split('|')
+        parsed_features_tmp = [f.split('=') for f in features]
+        parsed_features = {key:value for key, value in parsed_features_tmp}
+        return parsed_features
+
+    def field(self, field):
+        return self.word_dict[field]
+
+    def get_feature(self, feature):
+        return self.parsed_features.get(feature)
+
 class Sentence:
     def __init__(self, words_list):
         self.list = words_list
@@ -10,7 +27,14 @@ class Sentence:
         return self.list
 
     def find_word(self, word_id):
-        tmp_list = [i for i in self.list if i['index'] == word_id]
+        tmp_list = [i for i in self.list if i.field('index') == word_id]
+        if tmp_list:
+            return tmp_list[0]
+        else:
+            return None
+
+    def find_in_sentence(self, sent_word_id):
+        tmp_list = [i for i in self.list if i.field('index in sentence') == sent_word_id]
         if tmp_list:
             return tmp_list[0]
         else:
@@ -29,6 +53,9 @@ class Text:
             else:
                 pass
         return None
+
+    def get_sentence(self, sent_num):
+        return self.sent_list[sent_num]
 
     def get_sent_list(self):
         return self.sent_list
@@ -60,7 +87,9 @@ for i, line in enumerate(f):
     tmp_word['deprel'] = spl[7]
     tmp_word['sentence'] = len(sentences)
 
-    tmp_sent.append(tmp_word)
+    new_word = Word(tmp_word)
+
+    tmp_sent.append(new_word)
 
     if int(spl[0]) == 1:
         if i > 0:
@@ -70,7 +99,7 @@ for i, line in enumerate(f):
 
 text = Text(sentences)
 
-# print text.find_word(200)
+# print text.find_word(205).get_feature('Case')
 # print sentences[4].find_word(160)
 
 pronoun_list = ["он", "она", "оно", "они"
@@ -114,11 +143,19 @@ class Classifier:
 
 
     def is_word_acceptable(self, prep, candidate):
-        #arguments dependancy
-        if prep['head'] == candidate['head']:
-            return False
 
-        elif
+
+        tmp_word = self.text.get_sentence(candidate.field('sentence')).find_in_sentence(candidate.field('head'))
+
+        condition_list = []
+
+        # arguments dependancy
+        condition_list.append( prep.field('head') != candidate.field('head') )
+
+        # NP dependancy
+        condition_list.append( prep.field('head') != tmp_word.field('head') and \
+                               tmp_word.field('deprel') == "nmod" and \
+                               tmp_word.get_feature("Case") == "Gen" )
 
 
     #
