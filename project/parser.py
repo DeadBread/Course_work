@@ -2,22 +2,34 @@
 
 f = open("../output.txt")
 
-class Word:
-    def __init__(self, word_dict):
-        self.word_dict = word_dict
-        self.parsed_features = self.__parse_features__()
+class AbstractWord:
+    def __init__(self):
+        pass
 
-    def __parse_features__(self):
-        features = self.word_dict['morph features'].split('|')
+    def __parse_features__(self, morph_features):
+        features = morph_features.split('|')
         parsed_features_tmp = [f.split('=') for f in features]
         parsed_features = {key:value for key, value in parsed_features_tmp}
         return parsed_features
 
+    def get_feature(self, feature):
+        return self.parsed_features.get(feature)
+
+class Word(AbstractWord):
+    def __init__(self, word_dict):
+        self.word_dict = word_dict
+        self.parsed_features = self.__parse_features__(self.word_dict['morph features'])
+
     def field(self, field):
         return self.word_dict[field]
 
-    def get_feature(self, feature):
-        return self.parsed_features.get(feature)
+class Pronoun(AbstractWord):
+    def __init__(self, text, features):
+        self.text = text
+        self.parsed_features = self.__parse_features__(features)
+
+    def get_text(self):
+        return self.text
 
 class Sentence:
     def __init__(self, words_list):
@@ -72,8 +84,6 @@ for i, line in enumerate(f):
     if len(spl) < 1:
         continue
 
-    # print spl[9]
-
     # tmp_sent = []
 
     tmp_word = dict()
@@ -99,34 +109,30 @@ for i, line in enumerate(f):
 
 text = Text(sentences)
 
-# print text.find_word(205).get_feature('Case')
-# print sentences[4].find_word(160)
 
-pronoun_list = ["он", "она", "оно", "они"
-                "его", "ее", "её", "их"
-                "ему", "ей", "им",
-                "нем", "ней", "них"]
+pronoun_text_list = ["он", "она", "оно", "они",
+                     "его", "ее", "её", "их",
+                     "ему", "ей", "им",
+                     "нем", "ней", "них"]
 
-pronoun_info = {}
+pronoun_feature_list = {}
 
-pronoun_info["он"] = ["Animacy=Anim", "Case=Nom", "Gender=Masc", "Number=Sing"]
-pronoun_info["она"] = ["Animacy=Anim", "Case=Nom", "Gender=Fem", "Number=Sing"]
-pronoun_info["оно"] = ["Animacy=Inan", "Case=Nom", "Gender=Neut", "Number=Sing"]
-pronoun_info["они"] = ["Case=Nom",  "Number=Plur"]
-pronoun_info["его"] = ["Case=Acc", "Case=Gen", "Gender=Masc", "Gender=Neut", "Number=Sing"]
-pronoun_info["еe"] = ["Animacy=Anim", "Case=Acc", "Case=Gen", "Gender=Fem", "Number=Sing"]
-pronoun_info["её"] = pronoun_info["еe"]
-pronoun_info["их"] = ["Case=Acc", "Case=Gen",  "Number=Plur"]
-pronoun_info["ему"] = ["Case=Dat", "Gender=Masc", "Gender=Neut", "Number=Sing"]
-pronoun_info["ей"] = ["Animacy=Anim", "Case=Dat", "Case=Ins", "Gender=Fem", "Number=Sing"]
-pronoun_info["им"] = ["Case=Dat", "Number=Plur", "Gender=Masc", "Case=Ins", "Number=Sing"]
-pronoun_info["нем"] = ["Case=Loc", "Gender=Masc", "Gender=Neut", "Number=Sing"]
-pronoun_info["ней"] = ["Animacy=Anim", "Case=Loc", "Gender=Fem", "Number=Sing"]
-pronoun_info["них"] = ["Case=Loc", "Number=Plur"]
+pronoun_feature_list["он"] = "Animacy=Anim|Case=Nom|Gender=Masc|Number=Sing"
+pronoun_feature_list["она"] = "Animacy=Anim|Case=Nom|Gender=Fem|Number=Sing"
+pronoun_feature_list["оно"] = "Animacy=Inan|Case=Nom|Gender=Neut|Number=Sing"
+pronoun_feature_list["они"] = "Case=Nom|Number=Plur"
+pronoun_feature_list["его"] = "Case=AccGen|Gender=MascNeut|Number=Sing"
+pronoun_feature_list["ее"] = "Animacy=Anim|Case=AccGen|Gender=Fem|Number=Sing"
+pronoun_feature_list["её"] = pronoun_feature_list["ее"]
+pronoun_feature_list["их"] = "Case=AccGen|Number=Plur|Gender=Masc"
+pronoun_feature_list["ему"] = "Case=Dat|Gender=MascNeut|Number=Sing"
+pronoun_feature_list["ей"] = "Animacy=Anim|Case=DatIns|Gender=Fem|Number=Sing"
+pronoun_feature_list["им"] = "Case=DatIns|Number=Plur"
+pronoun_feature_list["нем"] = "Case=Loc|Gender=Masc|Gender=Neut|Number=Sing"
+pronoun_feature_list["ней"] = "Animacy=Anim|Case=Loc|Gender=Fem|Number=Sing"
+pronoun_feature_list["них"] = "Case=Loc|Number=Plur"
 
-# print pronoun_info
-
-
+pronoun_list = [Pronoun(i, pronoun_feature_list[i]) for i in pronoun_text_list]
 
 class Classifier:
 
@@ -134,30 +140,66 @@ class Classifier:
         self.text = text
         self.way = way
 
-    def predict_word(self, num_word, num_prep):
-        word = self.text.find_word(num_word)
-        prep = self.text.find_word(num_prep)
-        sent_num = word['sentence']
-        area = self.text.get_sent_list()[sent_num - 7 : sent_num + 2]
-        candidates = [w for w in area if self.is_word_acceptable(prep, w)]
+    def build_prediction_list(self):
+        self.pred_list = []
+        for sentence in text.get_sent_list():
+            for word in sentence.get_list():
+                if word.field('text') in pronoun_text_list:
+                    self.pred_list.append(word)
 
+    def predict_word(self, num_word, num_pron):
+        # word = self.text.find_word(num_word)
+        pronoun = self.text.find_word(num_pron)
+        sent_num = pronoun.field('sentence')
+        area = self.text.get_sent_list()[max (sent_num - 5, 0) : sent_num + 2]
 
-    def is_word_acceptable(self, prep, candidate):
+        print pronoun.field('text')
+        candidates = []
+        for sentence in area:
+            tmp = sentence.get_list()
+            for word in tmp:
+                if self.is_word_acceptable(pronoun, word):
+                    candidates.append(word)
+                    print word.field('text')
 
+        print len(candidates)
 
-        tmp_word = self.text.get_sentence(candidate.field('sentence')).find_in_sentence(candidate.field('head'))
+    def is_word_acceptable(self, pron, candidate):
 
         condition_list = []
 
+        # leave nouns only
+        if candidate.field('postag') != 'NOUN':
+            return False
+
+        pronoun_info = [i for i in pronoun_list if i.get_text() == pron.field('text')][0]
+
+        # pronoun and atecedent should be the same number
+        condition_list.append( candidate.get_feature('Number') == pronoun_info.get_feature('Number') )
+
+        tmp_word = self.text.get_sentence(candidate.field('sentence')).find_in_sentence(candidate.field('head'))
+
         # arguments dependancy
-        condition_list.append( prep.field('head') != candidate.field('head') )
+        condition_list.append( pron.field('head') != candidate.field('head') )
 
         # NP dependancy
-        condition_list.append( prep.field('head') != tmp_word.field('head') and \
-                               tmp_word.field('deprel') == "nmod" and \
-                               tmp_word.get_feature("Case") == "Gen" )
+        if tmp_word is not None:
+            condition_list.append( pron.field('head') != tmp_word.field('head') and \
+                                  tmp_word.field('deprel') != "nmod" and \
+                                  tmp_word.get_feature("Case") != "Gen" )
+
+        for i, cond in enumerate(condition_list):
+            if not cond:
+                return False
+
+        return True
 
 
+
+cls = Classifier(text, 0)
+
+cls.build_prediction_list()
+cls.predict_word(0, cls.pred_list[4].field('index'))
     #
     # def __is_acceptable (self, num_word, )
 
