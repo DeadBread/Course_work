@@ -56,6 +56,7 @@ class Pronoun(AbstractWord):
 class Sentence:
     def __init__(self, words_list):
         self.list = words_list
+        # print self.list
 
     def get_list(self):
         return self.list
@@ -73,6 +74,13 @@ class Sentence:
             return tmp_list[0]
         else:
             return None
+
+    def occ_num(self, word_text):
+        i = 0;
+        for word in self.get_list():
+            if word_text == word.field('text'):
+                i += 1
+        return i
 
 
 class Text:
@@ -94,6 +102,10 @@ class Text:
     def get_sent_list(self):
         return self.sent_list
 
+    def get_word_frequency(self, word_text):
+        return sum([sent.occ_num(word_text) for sent in self.get_sent_list()])
+
+
 class Classifier:
 
     def __init__(self, text, way):
@@ -104,7 +116,7 @@ class Classifier:
         self.pred_list = []
         for sentence in text.get_sent_list():
             for word in sentence.get_list():
-                if word.field('text') in pronoun_text_list:
+                if word.field('text').lower() in pronoun_text_list:
                     self.pred_list.append(word)
 
     def predict_word(self, num_word, num_pron):
@@ -128,7 +140,7 @@ class Classifier:
         self.features = {}
         for candidate in candidates:
             self.features[candidate] = self.get_features_list(candidate, pronoun)
-            # print candidate.field('text'), self.features[candidate]
+            print candidate.field('text'), self.features[candidate]
 
 
     def get_features_list(self, candidate, pronoun):
@@ -145,7 +157,6 @@ class Classifier:
         features_list.append(sent_delta)
 
         #feature connected with candidates position in a sentence
-
         pos_feature = 0
         if candidate.field('deprel') == 'nsubj' or candidate.field('postag') == 'nsubjpass':
             pos_feature = 2
@@ -155,10 +166,10 @@ class Classifier:
         features_list.append(pos_feature)
 
         # :TODO frequency feature might be implemented
+        # :TODO add word2vec feature if there will be any time left
 
         # feature connected with the case of pronoun and it's antecedent
         # It's written like "in" here, because each pronoun may have several  variants of case
-
         if candidate.get_feature('Case') is not None:
             case_feature = 0
             if candidate.get_feature('Case') in pronoun_info.get_feature('Case'):
@@ -171,6 +182,24 @@ class Classifier:
             if candidate.get_feature('Animacy') in pronoun_info.get_feature('Animacy'):
                 animacy_feature = 1
             features_list.append(animacy_feature)
+
+
+        #simple parallelism feature
+        synt_parallel_feature = 0
+        if candidate.field("deprel") == pronoun.field("deprel"):
+            synt_parallel_feature = 1
+            head_pron = self.text.get_sentence(pronoun.field('sentence')).find_in_sentence(pronoun.field('head'))
+            head_candidate = self.text.get_sentence(candidate.field('sentence')).find_in_sentence(candidate.field('head'))
+            if head_candidate.field('deprel') == head_pron.field('deprel'):
+                synt_parallel_feature = 2
+                if head_pron.field('deprel') == 'ROOT':
+                    synt_parallel_feature = 3
+        else:
+            print candidate.field("deprel"), pronoun.field("deprel")
+        features_list.append(synt_parallel_feature)
+
+        frequency_feature = self.text.get_word_frequency(candidate.field('text'))
+        features_list.append(frequency_feature)
 
         return features_list
 
@@ -260,7 +289,8 @@ text = Text(sentences)
 cls = Classifier(text, 0)
 
 cls.build_prediction_list()
-cls.predict_word(0, cls.pred_list[4].field('index'))
+cls.predict_word(0, cls.pred_list[0].field('index'))
+print cls.pred_list[0].field('text'), cls.pred_list[0].field('index')
     #
     # def __is_acceptable (self, num_word, )
 
