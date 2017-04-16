@@ -1,28 +1,54 @@
 # -*- coding: utf-8 -*-
 
+from gensim.models import KeyedVectors
+# from nltk.stem.snowball import SnowballStemmer
+from pymystem3 import Mystem
+
 f = open("../output.txt")
 
-pronoun_text_list = ["он", "она", "оно", "они",
-                     "его", "ее", "её", "их",
-                     "ему", "ей", "им",
-                     "нем", "ней", "них"]
+# pronoun_text_list = ["он", "она", "оно", "они",
+#                      "его", "ее", "её", "их",
+#                      "ему", "ей", "им",
+#                      "нем", "ней", "них"
+#                      "него", "нее"]
+
+pronoun_text_list = ["он", "его", "него", "ему", "нему", "им", "ним", "нем", "нём",
+                     "она", "ее", "её", "нее", "неё", "ей", "ней", "ею", "нею",
+                     "оно",
+                     "они", "их", "них", "им", "ним", "ими", "ними"]
 
 pronoun_feature_list = {}
 
-pronoun_feature_list["он"] = "Animacy=Anim|Case=Nom|Gender=Masc|Number=Sing"
-pronoun_feature_list["она"] = "Animacy=Anim|Case=Nom|Gender=Fem|Number=Sing"
-pronoun_feature_list["оно"] = "Animacy=Inan|Case=Nom|Gender=Neut|Number=Sing"
-pronoun_feature_list["они"] = "Case=Nom|Number=Plur"
+pronoun_feature_list["он"] = "Case=Nom|Gender=Masc|Number=Sing"
+pronoun_feature_list["него"] = "Animacy=Anim|Case=AccGen|Gender=MascNeut|Number=Sing"
 pronoun_feature_list["его"] = "Case=AccGen|Gender=MascNeut|Number=Sing"
-pronoun_feature_list["ее"] = "Animacy=Anim|Case=AccGen|Gender=Fem|Number=Sing"
+pronoun_feature_list["ему"] = "Animacy=Anim|Case=Dat|Gender=MascNeut|Number=Sing"
+pronoun_feature_list["нему"] = "Case=Dat|Gender=MascNeut|Number=Sing"
+pronoun_feature_list["им"] = "Case=DatIns"
+pronoun_feature_list["ним"] = "Case=InsDat|Gender=MascNeut"
+pronoun_feature_list["нем"] = "Case=Loc|Gender=MascNeut|Number=Sing"
+pronoun_feature_list["нём"] = pronoun_feature_list["нем"]
+
+pronoun_feature_list["она"] = "Case=Nom|Gender=Fem|Number=Sing"
+pronoun_feature_list["ее"] = "Case=AccGen|Gender=Fem|Number=Sing"
 pronoun_feature_list["её"] = pronoun_feature_list["ее"]
-pronoun_feature_list["их"] = "Case=AccGen|Number=Plur|Gender=Masc"
-pronoun_feature_list["ему"] = "Case=Dat|Gender=MascNeut|Number=Sing"
+pronoun_feature_list["нее"] = "Case=AccGen|Gender=Fem|Number=Sing"
+pronoun_feature_list["неё"] = pronoun_feature_list["нее"]
 pronoun_feature_list["ей"] = "Animacy=Anim|Case=DatIns|Gender=Fem|Number=Sing"
-pronoun_feature_list["им"] = "Case=DatIns|Number=Plur"
-pronoun_feature_list["нем"] = "Case=Loc|Gender=Masc|Gender=Neut|Number=Sing"
-pronoun_feature_list["ней"] = "Animacy=Anim|Case=Loc|Gender=Fem|Number=Sing"
-pronoun_feature_list["них"] = "Case=Loc|Number=Plur"
+pronoun_feature_list["ею"] = "Animacy=Anim|Case=Ins|Gender=Fem|Number=Sing"
+pronoun_feature_list["ней"] = "Case=InsLoc|Gender=Fem|Number=Sing"
+pronoun_feature_list["нею"] = "Animacy=Anim|Case=InsLoc|Gender=Fem|Number=Sing"
+
+pronoun_feature_list["оно"] = "Animacy=Inan|Case=Nom|Gender=Neut|Number=Sing"
+
+pronoun_feature_list["они"] = "Case=Nom|Number=Plur"
+pronoun_feature_list["их"] = "Case=AccGen|Number=Plur"
+pronoun_feature_list["них"] = "Case=AccGenLoc|Number=Plur"
+# pronoun_feature_list["им"] = "Case=DatIns"
+# pronoun_feature_list["ним"] = "Case=Dat|Number=Plur"
+pronoun_feature_list["ими"] = "Animacy=Anim|Case=Ins|Number=Plur"
+pronoun_feature_list["ними"] = "Animacy=Anim|Case=Ins|Number=Plur"
+
 
 class AbstractWord:
     def __init__(self):
@@ -111,6 +137,11 @@ class Classifier:
     def __init__(self, text, way):
         self.text = text
         self.way = way
+        self.associations = dict()
+        self.model = KeyedVectors.load_word2vec_format('/home/gand/lib/word2vec/ruscorpora.model.bin', binary=True)
+        # self.Stemmer = SnowballStemmer('russian')
+        self.mystem = Mystem()
+        self.coefficients = [-0.05,-1,3,2,2,2,5]
 
     def build_prediction_list(self):
         self.pred_list = []
@@ -119,10 +150,15 @@ class Classifier:
                 if word.field('text').lower() in pronoun_text_list:
                     self.pred_list.append(word)
 
-    def predict_word(self, num_word, num_pron):
+    def predict(self):
+        for pronoun in self.pred_list:
+            tmp = self.predict_word(pronoun.field('index'))
+            print pronoun.field('text'), pronoun.field('index'), "refers to", tmp.field('text'), tmp.field('index')
+
+    def predict_word(self, num_pron):
         # word = self.text.find_word(num_word)
         pronoun = self.text.find_word(num_pron)
-        # print num_pron
+        # print num_pron, pronoun.field('text')
         sent_num = pronoun.field('sentence')
         area = self.text.get_sent_list()[max(sent_num - 5, 0): sent_num + 2]
 
@@ -140,8 +176,46 @@ class Classifier:
         self.features = {}
         for candidate in candidates:
             self.features[candidate] = self.get_features_list(candidate, pronoun)
-            print candidate.field('text'), self.features[candidate]
 
+
+        antecedent = self.get_right_word(pronoun)
+        self.associations[antecedent.field('index')] = pronoun
+
+        return antecedent
+            # print candidate.field('text'), self.features[candidate]
+
+    def get_right_word(self, pronoun):
+        score_list = []
+        for candidate in self.features.keys():
+            tmp = [a * b for (a, b) in zip(self.features[candidate], self.coefficients)]
+
+            if candidate.field('index') in self.associations.keys():    #coreference!
+                if self.coreference(pronoun, self.associations[candidate.field('index')]):
+                    return candidate
+
+            #penalizing kataphora
+            if tmp[0] > 0:
+                tmp[0] = - 3 * tmp[0]
+            if tmp[1] > 0:
+                tmp[1] = - 3 * tmp[1]
+            score = sum(tmp)
+            score_list.append(score)
+            # print candidate.field('text'), candidate.field('index'), score
+        return self.features.keys()[score_list.index(max(score_list))]
+
+    def coreference(self, left_pron, right_pron):
+        if left_pron.field('head') == right_pron.field('head') and \
+                left_pron.field('sentence') == right_pron.field('sentence'):
+            return False
+
+        set1 = ["он", "его", "него", "ему", "нему", "им", "ним", "нем", "нём"]
+        set2 =  ["она", "ее", "её", "нее", "неё", "ей", "ней", "ею", "нею"]
+
+        if left_pron.field('text') in set1 and right_pron.field('text') in set1 or \
+                left_pron.field('text') in set2 and right_pron.field('text') in set2:
+            return True
+        else:
+            return False
 
     def get_features_list(self, candidate, pronoun):
 
@@ -149,11 +223,21 @@ class Classifier:
         features_list = []
 
         # distance between candidate and pronoun. Might be negative, if candidate is further then the pronoun
-        delta = pronoun.field('index') - candidate.field('index')
+        delta = 0
+        if candidate.field('index') in self.associations.keys():
+            tmp = self.associations[candidate.field('index')]
+            delta = pronoun.field('index') - tmp.field('index')
+        else:
+            delta = pronoun.field('index') - candidate.field('index')
         features_list.append(delta)
 
         #number of sentences between candidate and pronoun. Also might be negative
-        sent_delta = pronoun.field('sentence') - candidate.field('sentence')
+        sent_delta = 0
+        if candidate.field('sentence') in self.associations.keys():
+            tmp = self.associations[candidate.field('sentence')]
+            sent_delta = pronoun.field('sentence') - tmp.field('sentence')
+        else:
+            sent_delta = pronoun.field('sentence') - candidate.field('sentence')
         features_list.append(sent_delta)
 
         #feature connected with candidates position in a sentence
@@ -194,20 +278,56 @@ class Classifier:
                 synt_parallel_feature = 2
                 if head_pron.field('deprel') == 'ROOT':
                     synt_parallel_feature = 3
-        else:
-            print candidate.field("deprel"), pronoun.field("deprel")
+        # else:
+        #     print candidate.field("deprel"), pronoun.field("deprel")
         features_list.append(synt_parallel_feature)
 
+        #Frequency feature
         frequency_feature = self.text.get_word_frequency(candidate.field('text'))
         features_list.append(frequency_feature)
 
+        #Using Word2Vec
+        similarity_feature = 0
+        left_neighbour = self.text.find_word(pronoun.field('index') - 1)
+        if left_neighbour.field('punct text') != '_':
+            left_neighbour = self.text.find_word(pronoun.field('index') - 2)
+        # print left_neighbour.field('text')
+
+        right_neighbour = self.text.find_word(pronoun.field('index') + 1)
+        if right_neighbour.field('punct text') != '_':
+            right_neighbour = self.text.find_word(pronoun.field('index') + 2)
+        # print right_neighbour.field('text')
+
+        try:
+            if left_neighbour is not None:
+                similarity_feature += self.model.similarity(candidate.field('text').decode('utf8'), left_neighbour.field('text').decode('utf8'))
+            if right_neighbour is not None:
+                similarity_feature += self.model.similarity(candidate.field('text').decode('utf8'), right_neighbour.field('text').decode('utf8'))
+        except KeyError as e:
+            try:
+                # left_neighbour_stem = self.Stemmer.stem(left_neighbour.field('text'))
+                # right_neighbour_stem = self.Stemmer.stem(right_neighbour.field('text'))
+
+                left_neighbour_lemma = self.mystem.lemmatize(left_neighbour.field('text'))[0]
+                right_neighbour_lemma = self.mystem.lemmatize(right_neighbour.field('text'))[0]
+
+                # print left_neighbour_lemma
+                # print right_neighbour_lemma
+
+                if left_neighbour_lemma is not None:
+                    similarity_feature += self.model.similarity(candidate.field('text').decode('utf8'),
+                                                                left_neighbour_lemma.decode('utf8'))
+                if right_neighbour_lemma is not None:
+                    similarity_feature += self.model.similarity(candidate.field('text').decode('utf8'),
+                                                                right_neighbour_lemma.decode('utf8'))
+            except:
+                pass
+                # print str(e)
+                # similarity_feature = 0
+        features_list.append(similarity_feature)
+
+        # print features_list
         return features_list
-
-
-
-
-
-
 
     def is_word_acceptable(self, pron, candidate):
 
@@ -219,29 +339,35 @@ class Classifier:
 
         pronoun_info = [i for i in pronoun_list if i.get_text() == pron.field('text')][0]
 
-        # print candidate.field('text')
-
         # pronoun and atecedent should be the same number
-        if candidate.get_feature('Number') is not None:
+        if candidate.get_feature('Number') and pronoun_info.get_feature('Number') is not None:
             condition_list.append(candidate.get_feature('Number') in pronoun_info.get_feature('Number'))
 
-        if candidate.get_feature('Gender') is not None:
+        #need to do something with that. In syntaxnet gender doesn't always work correctly
+        if candidate.get_feature('Gender')and pronoun_info.get_feature('Gender') is not None:
             condition_list.append(candidate.get_feature('Gender') in pronoun_info.get_feature('Gender'))
 
         tmp_word = self.text.get_sentence(candidate.field('sentence')).find_in_sentence(candidate.field('head'))
 
         # arguments dependancy
-        condition_list.append(pron.field('head') != candidate.field('head'))
+        arg_dep = pron.field('head') != candidate.field('head') or \
+                    pron.field('sentence') != candidate.field('sentence')
+
+        if pron.field('index') == 231:
+            print "arg_dep ", arg_dep, candidate.field('text')
+        condition_list.append(arg_dep)
 
         # NP dependancy
+        np_dep = True
         if tmp_word is not None:
-            condition_list.append(pron.field('head') != tmp_word.field('head') or \
+            np_dep = pron.field('head') != tmp_word.field('head') or \
                                   tmp_word.field('deprel') != "nmod" or \
-                                  tmp_word.get_feature("Case") != "Gen")
+                                  tmp_word.get_feature("Case") != "Gen" or \
+                                  pron.field('sentence') != candidate.field('sentence')
+            condition_list.append(np_dep)
 
         for i, cond in enumerate(condition_list):
             if not cond:
-                # print i, candidate.field('text'), candidate.field('index')
                 return False
 
         return True
@@ -289,8 +415,31 @@ text = Text(sentences)
 cls = Classifier(text, 0)
 
 cls.build_prediction_list()
-cls.predict_word(0, cls.pred_list[0].field('index'))
-print cls.pred_list[0].field('text'), cls.pred_list[0].field('index')
+
+# print len(cls.pred_list)
+# for pron in cls.pred_list:
+#     print pron.field('text'), pron.field('index')
+
+cls.predict()
+
+# print cls.pred_list[1].field('text')
+# tmp = cls.predict_word(cls.pred_list[3].field('index'))
+# print tmp.field('text'), tmp.field('index')
+# print cls.pred_list[0].field('text'), cls.pred_list[0].field('index')
+
+# try:
+#     model = KeyedVectors.load_word2vec_format('/home/gand/lib/word2vec/ruscorpora.model.bin', binary=True)
+#     print model.similarity('решение'.decode('utf8'), 'мастер'.decode('utf8'))
+#
+#     sent = text.get_sent_list()[0]
+#
+#     for word in sent.get_list():
+#         print word.field('text')
+#
+# except KeyError as e:
+#     print str(e)
+    # print model.doesnt_match("бык лошадь чайка корова".decode('utf8').split())
+
     #
     # def __is_acceptable (self, num_word, )
 
