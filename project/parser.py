@@ -5,12 +5,8 @@ from gensim.models import KeyedVectors
 from pymystem3 import Mystem
 
 f = open("../output.txt")
-
-# pronoun_text_list = ["он", "она", "оно", "они",
-#                      "его", "ее", "её", "их",
-#                      "ему", "ей", "им",
-#                      "нем", "ней", "них"
-#                      "него", "нее"]
+file = f.read()
+f = file.split('\n')
 
 pronoun_text_list = ["он", "его", "него", "ему", "нему", "им", "ним", "нем", "нём",
                      "она", "ее", "её", "нее", "неё", "ей", "ней", "ею", "нею",
@@ -48,6 +44,10 @@ pronoun_feature_list["них"] = "Case=AccGenLoc|Number=Plur"
 # pronoun_feature_list["ним"] = "Case=Dat|Number=Plur"
 pronoun_feature_list["ими"] = "Animacy=Anim|Case=Ins|Number=Plur"
 pronoun_feature_list["ними"] = "Animacy=Anim|Case=Ins|Number=Plur"
+
+sentences = []
+tmp_sent = []
+words_count = 0
 
 
 class AbstractWord:
@@ -143,6 +143,15 @@ class Classifier:
         self.mystem = Mystem()
         self.coefficients = [-0.05,-1,3,2,2,2,5]
 
+    def import_answers(self):
+        file = open("../answers")
+        self.answer_list = []
+        self.answer_dict = dict()
+        for line in file:
+            line = line.split()
+            self.answer_list.append(int(line[1]))
+            self.answer_dict[int(line[0])] = int(line[1])
+
     def build_prediction_list(self):
         self.pred_list = []
         for sentence in text.get_sent_list():
@@ -151,9 +160,16 @@ class Classifier:
                     self.pred_list.append(word)
 
     def predict(self):
+        i = 0.0
         for pronoun in self.pred_list:
             tmp = self.predict_word(pronoun.field('index'))
             print pronoun.field('text'), pronoun.field('index'), "refers to", tmp.field('text'), tmp.field('index')
+            if self.answer_dict[pronoun.field('index')] == tmp.field('index'):
+                i += 1.0
+            else:
+                print "wrong! ", tmp.field('index'), "instead of", self.answer_dict[pronoun.field('index')]
+
+        print "purity",  i / len(self.answer_list)
 
     def predict_word(self, num_pron):
         # word = self.text.find_word(num_word)
@@ -200,7 +216,9 @@ class Classifier:
                 tmp[1] = - 3 * tmp[1]
             score = sum(tmp)
             score_list.append(score)
-            # print candidate.field('text'), candidate.field('index'), score
+
+            if pronoun.field('index') == 320:
+                print candidate.field('text'), candidate.field('index'), score
         return self.features.keys()[score_list.index(max(score_list))]
 
     def coreference(self, left_pron, right_pron):
@@ -289,6 +307,7 @@ class Classifier:
         #Using Word2Vec
         similarity_feature = 0
         left_neighbour = self.text.find_word(pronoun.field('index') - 1)
+
         if left_neighbour.field('punct text') != '_':
             left_neighbour = self.text.find_word(pronoun.field('index') - 2)
         # print left_neighbour.field('text')
@@ -353,8 +372,6 @@ class Classifier:
         arg_dep = pron.field('head') != candidate.field('head') or \
                     pron.field('sentence') != candidate.field('sentence')
 
-        if pron.field('index') == 231:
-            print "arg_dep ", arg_dep, candidate.field('text')
         condition_list.append(arg_dep)
 
         # NP dependancy
@@ -374,25 +391,21 @@ class Classifier:
 
 
 #:TODO distribute the code to different files
-sentences = []
-tmp_sent = []
-words_count = 0
 
 pronoun_list = [Pronoun(i, pronoun_feature_list[i]) for i in pronoun_text_list]
 
-for i, line in enumerate(f):
+i = 0
+for line in f:
 
     spl = line.split()
 
     if len(spl) < 1:
         continue
 
-    # tmp_sent = []
-
     tmp_word = dict()
     tmp_word['index'] = i
     tmp_word['index in sentence'] = spl[0]
-    tmp_word['text'] = spl[1]
+    tmp_word['text'] = spl[1].decode('utf8').lower().encode('utf8')
     tmp_word['postag'] = spl[3]
     tmp_word['punct text'] = spl[4]
     tmp_word['morph features'] = spl[5]
@@ -402,12 +415,16 @@ for i, line in enumerate(f):
 
     new_word = Word(tmp_word)
 
-    tmp_sent.append(new_word)
-
     if int(spl[0]) == 1:
         if i > 0:
             sentences.append(Sentence(tmp_sent))
         tmp_sent = []
+
+    tmp_sent.append(new_word)
+
+    i += 1
+
+sentences.append(Sentence(tmp_sent))
 
 
 text = Text(sentences)
@@ -416,9 +433,7 @@ cls = Classifier(text, 0)
 
 cls.build_prediction_list()
 
-# print len(cls.pred_list)
-# for pron in cls.pred_list:
-#     print pron.field('text'), pron.field('index')
+cls.import_answers()
 
 cls.predict()
 
