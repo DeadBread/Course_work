@@ -3,8 +3,10 @@
 from gensim.models import KeyedVectors
 # from nltk.stem.snowball import SnowballStemmer
 from pymystem3 import Mystem
+from sklearn import linear_model
+import numpy as np
 
-f = open("../output.txt")
+f = open("../output1.txt")
 file = f.read()
 f = file.split('\n')
 
@@ -44,10 +46,6 @@ pronoun_feature_list["них"] = "Case=AccGenLoc|Number=Plur"
 # pronoun_feature_list["ним"] = "Case=Dat|Number=Plur"
 pronoun_feature_list["ими"] = "Animacy=Anim|Case=Ins|Number=Plur"
 pronoun_feature_list["ними"] = "Animacy=Anim|Case=Ins|Number=Plur"
-
-sentences = []
-tmp_sent = []
-words_count = 0
 
 
 class AbstractWord:
@@ -154,7 +152,7 @@ class Classifier:
 
     def build_prediction_list(self):
         self.pred_list = []
-        for sentence in text.get_sent_list():
+        for sentence in self.text.get_sent_list():
             for word in sentence.get_list():
                 if word.field('text').lower() in pronoun_text_list:
                     self.pred_list.append(word)
@@ -171,10 +169,78 @@ class Classifier:
 
         print "purity",  i / len(self.answer_list)
 
-    def predict_word(self, num_pron):
-        # word = self.text.find_word(num_word)
-        pronoun = self.text.find_word(num_pron)
-        # print num_pron, pronoun.field('text')
+    def fit(self):
+
+        self.build_prediction_list()
+        set = []
+        # all_features_list = []
+        all_features_dict = dict()
+        for pron in self.pred_list:
+            tmp = self.candidates_list(pron)
+            set += tmp
+            # all_features_dict[pron.field('index')] = tmp
+            for candidate in tmp:
+                all_features_dict[(pron.field('index'), candidate.field('index'))] = self.get_features_list(candidate, pron)
+
+        all_features_array = np.ones((len(all_features_dict), len(all_features_dict.values()[0])))
+        # print "made array"
+        for i, key in enumerate(sorted(all_features_dict.keys())):
+            # print len(line)
+            all_features_array[i,:] = np.array(all_features_dict[key])
+
+        self.binary_set = map((lambda i : 1 if i.field('index') in self.answer_list else 0), set)
+
+        self.classifier = linear_model.LogisticRegression(solver='liblinear')
+        self.classifier.fit(np.array(all_features_array), np.array(self.binary_set))
+        # new_binary_set = classifier.predict(np.array(all_features_array))
+        # print self.classifier.score(np.array(all_features_array), np.array(self.binary_set))
+
+    def predict_learned(self, testing_text):
+        self.text = testing_text
+        self.build_prediction_list()
+
+        set = []
+        # all_features_list = []
+        all_features_dict = dict()
+        for pron in self.pred_list:
+            tmp = self.candidates_list(pron)
+            set += tmp
+            for candidate in tmp:
+                all_features_dict[(pron, candidate)] = self.get_features_list(candidate, pron)
+
+        # print len(all_features_dict)
+
+        all_features_array = np.ones((len(all_features_dict), len(all_features_dict.values()[0])))
+        for i, key in enumerate(sorted(all_features_dict.keys())):
+            all_features_array[i, :] = np.array(all_features_dict[key])
+
+        prediction = self.classifier.predict_proba(all_features_array)
+
+        for i, key in enumerate(sorted(all_features_dict.keys())):
+            all_features_dict[key] = prediction[i]
+        #     print prediction[i,1], self.binary_set[i]
+
+        k = 0
+        for pron in self.pred_list:
+
+            tmp1 = filter((lambda(a,b) : a.field('index') == pron.field('index')), all_features_dict)
+            # print len(tmp1)
+
+            # print pron.field('index'), pron.field('text'), ' : '
+            # for i in tmp1:
+            #     print i[1].field('index'), i[1].field("text"), all_features_dict[i], self.binary_set[k]
+            #     k += 1
+
+            # print "here"
+            max_prob = np.max([all_features_dict[i][1] for i in tmp1])
+            for key in tmp1:
+                # print all_features_dict[key]
+                if all_features_dict[key][1] == max_prob:
+                    print key[0].field('text'), key[0].field('index'), "refers to", key[1].field('text'), key[1].field('index'), "with probability", max_prob
+
+
+
+    def candidates_list(self, pronoun):
         sent_num = pronoun.field('sentence')
         area = self.text.get_sent_list()[max(sent_num - 5, 0): sent_num + 2]
 
@@ -185,9 +251,15 @@ class Classifier:
             for word in tmp:
                 if self.is_word_acceptable(pronoun, word):
                     candidates.append(word)
-                    # print word.field('text')
+        return candidates
 
-        # print len(candidates)
+    def predict_word(self, num_pron):
+        # word = self.text.find_word(num_word)
+        pronoun = self.text.find_word(num_pron)
+        # print num_pron, pronoun.field('text')
+        sent_num = pronoun.field('sentence')
+
+        candidates = self.candidates_list(pronoun)
 
         self.features = {}
         for candidate in candidates:
@@ -217,11 +289,10 @@ class Classifier:
             score = sum(tmp)
             score_list.append(score)
 
-            if pronoun.field('index') == 320:
-                print candidate.field('text'), candidate.field('index'), score
         return self.features.keys()[score_list.index(max(score_list))]
 
     def coreference(self, left_pron, right_pron):
+
         if left_pron.field('head') == right_pron.field('head') and \
                 left_pron.field('sentence') == right_pron.field('sentence'):
             return False
@@ -229,9 +300,14 @@ class Classifier:
         set1 = ["он", "его", "него", "ему", "нему", "им", "ним", "нем", "нём"]
         set2 =  ["она", "ее", "её", "нее", "неё", "ей", "ней", "ею", "нею"]
 
-        if left_pron.field('text') in set1 and right_pron.field('text') in set1 or \
-                left_pron.field('text') in set2 and right_pron.field('text') in set2:
-            return True
+        if left_pron.field("sentence") == right_pron.field('sentence'):
+            if left_pron.field('text') in set1 and right_pron.field('text') in set1 or \
+                    left_pron.field('text') in set2 and right_pron.field('text') in set2:
+                return True
+
+        if left_pron.field("sentence") == right_pron.field('sentence') - 1:
+            if left_pron.field('text') == right_pron.field('text'):
+                return True
         else:
             return False
 
@@ -272,18 +348,18 @@ class Classifier:
 
         # feature connected with the case of pronoun and it's antecedent
         # It's written like "in" here, because each pronoun may have several  variants of case
+        case_feature = 0
         if candidate.get_feature('Case') is not None:
-            case_feature = 0
             if candidate.get_feature('Case') in pronoun_info.get_feature('Case'):
                 case_feature = 1
-            features_list.append(case_feature)
+        features_list.append(case_feature)
 
         #feature connected with animacy of candidate
+        animacy_feature = 0
         if pronoun.get_feature('Animacy') is not None and candidate.get_feature('Animacy') is not None:
-            animacy_feature = 0
             if candidate.get_feature('Animacy') in pronoun_info.get_feature('Animacy'):
                 animacy_feature = 1
-            features_list.append(animacy_feature)
+        features_list.append(animacy_feature)
 
 
         #simple parallelism feature
@@ -292,7 +368,7 @@ class Classifier:
             synt_parallel_feature = 1
             head_pron = self.text.get_sentence(pronoun.field('sentence')).find_in_sentence(pronoun.field('head'))
             head_candidate = self.text.get_sentence(candidate.field('sentence')).find_in_sentence(candidate.field('head'))
-            if head_candidate.field('deprel') == head_pron.field('deprel'):
+            if head_candidate is not None and head_pron is not None and head_candidate.field('deprel') == head_pron.field('deprel'):
                 synt_parallel_feature = 2
                 if head_pron.field('deprel') == 'ROOT':
                     synt_parallel_feature = 3
@@ -317,33 +393,35 @@ class Classifier:
             right_neighbour = self.text.find_word(pronoun.field('index') + 2)
         # print right_neighbour.field('text')
 
+        # try:
+        #     if left_neighbour is not None:
+        #         similarity_feature += self.model.similarity(candidate.field('text').decode('utf8'), left_neighbour.field('text').decode('utf8'))
+        #     if right_neighbour is not None:
+        #         similarity_feature += self.model.similarity(candidate.field('text').decode('utf8'), right_neighbour.field('text').decode('utf8'))
+        # except KeyError as e:
+
         try:
-            if left_neighbour is not None:
-                similarity_feature += self.model.similarity(candidate.field('text').decode('utf8'), left_neighbour.field('text').decode('utf8'))
-            if right_neighbour is not None:
-                similarity_feature += self.model.similarity(candidate.field('text').decode('utf8'), right_neighbour.field('text').decode('utf8'))
-        except KeyError as e:
-            try:
-                # left_neighbour_stem = self.Stemmer.stem(left_neighbour.field('text'))
-                # right_neighbour_stem = self.Stemmer.stem(right_neighbour.field('text'))
+            left_neighbour_lemma = self.mystem.lemmatize(left_neighbour.field('text'))[0]
+            right_neighbour_lemma = self.mystem.lemmatize(right_neighbour.field('text'))[0]
 
-                left_neighbour_lemma = self.mystem.lemmatize(left_neighbour.field('text'))[0]
-                right_neighbour_lemma = self.mystem.lemmatize(right_neighbour.field('text'))[0]
+            candidate_lemma = self.mystem.lemmatize(candidate.field('text'))[0]
 
-                # print left_neighbour_lemma
-                # print right_neighbour_lemma
+            # print left_neighbour_lemma
+            # print right_neighbour_lemma
 
-                if left_neighbour_lemma is not None:
-                    similarity_feature += self.model.similarity(candidate.field('text').decode('utf8'),
-                                                                left_neighbour_lemma.decode('utf8'))
-                if right_neighbour_lemma is not None:
-                    similarity_feature += self.model.similarity(candidate.field('text').decode('utf8'),
-                                                                right_neighbour_lemma.decode('utf8'))
-            except:
-                pass
-                # print str(e)
-                # similarity_feature = 0
+            if left_neighbour_lemma is not None:
+                similarity_feature += self.model.similarity(candidate_lemma.decode('utf8'),
+                                                            left_neighbour_lemma.decode('utf8'))
+            if right_neighbour_lemma is not None:
+                similarity_feature += self.model.similarity(candidate_lemma.decode('utf8'),
+                                                            right_neighbour_lemma.decode('utf8'))
+        except:
+            pass
+
         features_list.append(similarity_feature)
+
+        # if len(features_list) < 7:
+        #     print len(features_list), pronoun.field('text'), candidate.field('text'), candidate.field('index')
 
         # print features_list
         return features_list
@@ -394,68 +472,65 @@ class Classifier:
 
 pronoun_list = [Pronoun(i, pronoun_feature_list[i]) for i in pronoun_text_list]
 
-i = 0
-for line in f:
 
-    spl = line.split()
+def get_text(file):
+    sentences = []
+    tmp_sent = []
+    words_count = 0
 
-    if len(spl) < 1:
-        continue
+    i = 0
+    for line in file:
+        spl = line.split()
 
-    tmp_word = dict()
-    tmp_word['index'] = i
-    tmp_word['index in sentence'] = spl[0]
-    tmp_word['text'] = spl[1].decode('utf8').lower().encode('utf8')
-    tmp_word['postag'] = spl[3]
-    tmp_word['punct text'] = spl[4]
-    tmp_word['morph features'] = spl[5]
-    tmp_word['head'] = spl[6]
-    tmp_word['deprel'] = spl[7]
-    tmp_word['sentence'] = len(sentences)
+        if len(spl) < 1:
+            continue
 
-    new_word = Word(tmp_word)
+        tmp_word = dict()
+        tmp_word['index'] = i
+        tmp_word['index in sentence'] = spl[0]
+        tmp_word['text'] = spl[1].decode('utf8').lower().encode('utf8')
+        tmp_word['postag'] = spl[3]
+        tmp_word['punct text'] = spl[4]
+        tmp_word['morph features'] = spl[5]
+        tmp_word['head'] = spl[6]
+        tmp_word['deprel'] = spl[7]
+        tmp_word['sentence'] = len(sentences)
 
-    if int(spl[0]) == 1:
-        if i > 0:
-            sentences.append(Sentence(tmp_sent))
-        tmp_sent = []
+        new_word = Word(tmp_word)
 
-    tmp_sent.append(new_word)
+        if int(spl[0]) == 1:
+            if i > 0:
+                sentences.append(Sentence(tmp_sent))
+            tmp_sent = []
 
-    i += 1
+        tmp_sent.append(new_word)
 
-sentences.append(Sentence(tmp_sent))
+        i += 1
 
+    sentences.append(Sentence(tmp_sent))
 
-text = Text(sentences)
+    return Text(sentences)
+
+train_file = open("../output1.txt")
+file = train_file.read()
+train_file = file.split('\n')
+
+text = get_text(train_file)
 
 cls = Classifier(text, 0)
 
-cls.build_prediction_list()
+# cls.build_prediction_list()
 
 cls.import_answers()
 
-cls.predict()
+cls.fit()
 
-# print cls.pred_list[1].field('text')
-# tmp = cls.predict_word(cls.pred_list[3].field('index'))
-# print tmp.field('text'), tmp.field('index')
-# print cls.pred_list[0].field('text'), cls.pred_list[0].field('index')
 
-# try:
-#     model = KeyedVectors.load_word2vec_format('/home/gand/lib/word2vec/ruscorpora.model.bin', binary=True)
-#     print model.similarity('решение'.decode('utf8'), 'мастер'.decode('utf8'))
-#
-#     sent = text.get_sent_list()[0]
-#
-#     for word in sent.get_list():
-#         print word.field('text')
-#
-# except KeyError as e:
-#     print str(e)
-    # print model.doesnt_match("бык лошадь чайка корова".decode('utf8').split())
+test_file = open("../output2.txt")
+file = test_file.read()
+test_file = file.split('\n')
 
-    #
-    # def __is_acceptable (self, num_word, )
+text2 = get_text(test_file)
 
-    # def predict(self, num_sentence):
+cls.predict_learned(text2)
+# cls.predict()
