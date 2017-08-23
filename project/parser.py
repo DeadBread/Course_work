@@ -4,6 +4,7 @@ from gensim.models import KeyedVectors
 from nltk.stem.snowball import SnowballStemmer
 from pymystem3 import Mystem
 from sklearn import linear_model
+from math import log
 
 f = open("../output1.txt")
 file = f.read()
@@ -62,13 +63,13 @@ class AbstractWord:
 
 class Word(AbstractWord):
     def __init__(self, word_dict):
-        self.word_dict = word_dict
-        self.parsed_features = self.__parse_features__(self.word_dict['morph features'])
+        self.field_dict = word_dict
+        self.parsed_features = self.__parse_features__(self.field_dict['morph features'])
 
     def field(self, field):
-        return self.word_dict[field]
+        return self.field_dict[field]
 
-class Pronoun(AbstractWord):
+class PronounInfo(AbstractWord):
     def __init__(self, text, features):
         self.text = text
         self.parsed_features = self.__parse_features__(features)
@@ -81,7 +82,7 @@ class Sentence:
         self.list = words_list
         # print self.list
 
-    def get_list(self):
+    def get_word_list(self):
         return self.list
 
     def find_word(self, word_id):
@@ -98,9 +99,9 @@ class Sentence:
         else:
             return None
 
-    def occ_num(self, word_text):
+    def get_num_occ(self, word_text):
         i = 0;
-        for word in self.get_list():
+        for word in self.get_word_list():
             if word_text == word.field('text'):
                 i += 1
         return i
@@ -126,10 +127,10 @@ class Text:
         return self.sent_list
 
     def get_word_frequency(self, word_text):
-        return sum([sent.occ_num(word_text) for sent in self.get_sent_list()])
+        return sum([sent.get_num_occ(word_text) for sent in self.get_sent_list()])
 
 
-class Classifier:
+class Resolver:
 
     def __init__(self, text, pronoun_list):
         self.text = text
@@ -142,19 +143,27 @@ class Classifier:
 
         self.s_dist_list = []
 
+        self.length = 10
+
 
         # purity = 52.2%
+
         # self.coefficients = [-0.05,-1,3,2,2,2,5,3]
 
-        # purity = 57%
-        # self.coefficients = [-0.5, 0, 3, 2, 2, 2, 5, 3, 5]
+
+        # purity = 54.7%
+        # SET ONE
+        # self.coefficients = [-10, -10, 10, 10, 10, 10, 10, 10, 10]
+
+        # SET TWO
+        # purity = 60%
+        # self.coefficients = [-5, 0, 30, 20, 20, 20, 50, 70, 50]
 
         # purity > 62%
         # purity = 65.2% with area = 10
-        self.coefficients = [-0.5, 0, 3, 1, 1, 1, 0.65, 0, 5]
+        # SET THREE
 
-        # purity = 55.1%
-        # self.coefficients = [-1, 0, 1, 1, 1, 1, 1, 1, 1]
+        self.coefficients = [-5, -7, 30, 10, 10, 10, 7, -50, 50]
 
         self.classifier = linear_model.LogisticRegression(solver='liblinear', verbose=0)
         # self.classifier = svm.SVC(C = 10, probability=True)
@@ -172,12 +181,13 @@ class Classifier:
     def build_prediction_list(self):
         self.pred_list = []
         for sentence in self.text.get_sent_list():
-            for word in sentence.get_list():
+            for word in sentence.get_word_list():
                 if word.field('text').lower() in pronoun_text_list:
                     self.pred_list.append(word)
 
     def predict(self):
         i = 0.0
+        self.not_founders = 0
         self.build_prediction_list()
         for pronoun in self.pred_list:
             tmp = self.predict_word(pronoun.field('index'))
@@ -188,19 +198,18 @@ class Classifier:
                 print "wrong! ", tmp.field('index'), "instead of", self.answer_dict[pronoun.field('index')]
 
         print "purity",  i / len(self.answer_list)
-
-
+        print "not found", self.not_founders
 
         return (i, len(self.answer_list))
 
-    def candidates_list(self, pronoun):
+    def build_candidates_list(self, pronoun, length):
         sent_num = pronoun.field('sentence')
-        area = self.text.get_sent_list()[max(sent_num - 10, 0): min(sent_num + 1, len(self.text.get_sent_list()))]
+        area = self.text.get_sent_list()[max(sent_num - length, 0): min(sent_num + 1, len(self.text.get_sent_list()))]
 
         # print pronoun.field('text')
         candidates = []
         for sentence in area:
-            tmp = sentence.get_list()
+            tmp = sentence.get_word_list()
             for word in tmp:
                 if self.is_word_acceptable(pronoun, word):
                     candidates.append(word)
@@ -212,12 +221,11 @@ class Classifier:
         # print num_pron, pronoun.field('text')
         sent_num = pronoun.field('sentence')
 
-        candidates = self.candidates_list(pronoun)
+        candidates = self.build_candidates_list(pronoun, self.length)
 
         self.features = {}
         for candidate in candidates:
-            self.features[candidate] = self.get_features_list(candidate, pronoun)
-
+            self.features[candidate] = self.build_features_list(candidate, pronoun)
 
         antecedent = self.get_right_word(pronoun)
         self.associations[pronoun] = antecedent
@@ -237,7 +245,7 @@ class Classifier:
                 tmp_s_distances = []
                 tmp = [i for i in self.associations.keys() if self.associations[i] == candidate]
                 for pron2 in tmp:
-                    if self.coreference(pronoun, pron2):
+                    if self.is_there_coreference(pronoun, pron2):
                         return candidate
                     tmp_distances.append(pronoun.field('index') - pron2.field('index'))
                     tmp_s_distances.append(pronoun.field('sentence index') - pron2.field('sentence index'))
@@ -257,16 +265,18 @@ class Classifier:
         self.s_dist_list.append(self.features[res][1])
 
         # print self.features[res], "- features of candidate, score =", max(score_list)
+
         try:
             ans_feat = self.features[self.text.find_word(self.answer_list[self.pred_list.index(pronoun)])]
             # print ans_feat, "features of answer, score = ", sum([a * b for (a, b) in zip(ans_feat, self.coefficients)])
         except:
-            print "not found in candidate list!"
+            print "not found in candidate list!", self.answer_list[self.pred_list.index(pronoun)]
+            self.not_founders += 1
 
 
         return res
 
-    def coreference(self, left_pron, right_pron):
+    def is_there_coreference(self, left_pron, right_pron):
 
         if left_pron.field('head') == right_pron.field('head') and \
                 left_pron.field('sentence') == right_pron.field('sentence'):
@@ -286,7 +296,7 @@ class Classifier:
         else:
             return False
 
-    def get_features_list(self, candidate, pronoun):
+    def build_features_list(self, candidate, pronoun):
 
         pronoun_info = [i for i in self.pronoun_list if i.get_text() == pronoun.field('text')][0]
         features_list = []
@@ -441,20 +451,20 @@ class Classifier:
 
         for i, cond in enumerate(condition_list):
             if not cond:
-                # if candidate.field('index') == 209:
-                #     print "stopped here!", i
+                if candidate.field('index') == 1278:
+                    print "stopped here!", i, pron.field('index')
                 return False
         return True
 
-    def output(self, file):
+    def output_results(self, file):
         for sentence in self.text.get_sent_list():
-            for word in sentence.get_list():
+            for word in sentence.get_word_list():
                 file.write(reduce((lambda x, y: x + " " + y), word.field('string')) + '\n')
 
 
 #:TODO distribute the code to different files
 
-pronoun_list = [Pronoun(i, pronoun_feature_list[i]) for i in pronoun_text_list]
+pronoun_list = [PronounInfo(i, pronoun_feature_list[i]) for i in pronoun_text_list]
 
 
 def get_text(file):
@@ -496,39 +506,45 @@ def get_text(file):
 
     return Text(sentences)
 
-train_file = open("../output1.txt")
-file = train_file.read()
-train_file = file.split('\n')
 
-text = get_text(train_file)
+def main():
+    train_file = open("../output1.txt")
+    file = train_file.read()
+    train_file = file.split('\n')
 
-cls = Classifier(text, pronoun_list)
-cls.import_answers("../answers")
+    text = get_text(train_file)
+    textl = len(text.get_sent_list())
 
-
-output_file = open("../result", 'w')
-
-cls.import_answers("../answers")
-a1 = cls.predict()
-
-# cls.output(output_file)
-
-print a1
-
-train_file = open("../output2.txt")
-file = train_file.read()
-train_file = file.split('\n')
-
-text = get_text(train_file)
-
-cls.text = text
-
-cls.import_answers("../answers2")
-
-a2 = cls.predict()
-
-print a2
-
-print "purity = ", (a1[0] + a2[0]) / (a1[1] + a2[1])
+    cls = Resolver(text, pronoun_list)
+    cls.import_answers("../answers")
 
 
+    output_file = open("../result1", 'w')
+
+    cls.import_answers("../answers")
+    a1 = cls.predict()
+
+    cls.output_results(output_file)
+
+    train_file = open("../output2.txt")
+    file = train_file.read()
+    train_file = file.split('\n')
+
+    text = get_text(train_file)
+    textl += len(text.get_sent_list())
+
+    cls.text = text
+
+    cls.import_answers("../answers2")
+
+    a2 = cls.predict()
+
+    cls.output_results(output_file)
+
+    print a2
+
+    print "purity = ", (a1[0] + a2[0]) / (a1[1] + a2[1])
+
+
+
+main()
